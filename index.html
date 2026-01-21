@@ -1,0 +1,286 @@
+
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <title>Mapa Leaflet – OSM/Imagem Satélite + WFS (Campinas)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet CSS/JS via CDN -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <!-- OPCIONAL: Google Satélite via Google Maps JS API + GoogleMutant (requer chave de API e pode incorrer em custos)
+  <script src="https://maps.googleapis.com/maps/api/js?key=INSIRA_SUA_CHAVE_AQUI" async defer></script>
+  <script src="https://unpkg.com/leaflet.gridlayer.googlemutant@0.14.0/Leaflet.GoogleMutant.js"></script>
+  -->
+
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    .leaflet-control-layers-expanded {
+      max-height: 300px;
+      overflow: auto;
+    }
+    .status {
+      position: absolute;
+      z-index: 1000;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(255,255,255,0.9);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font: 13px/1.2 "Segoe UI", Roboto, Arial, sans-serif;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    .status .err { color: #b00020; }
+    .status .ok { color: #1b5e20; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="status" class="status">Carregando capacidades WFS…</div>
+
+  <script>
+    // ========= CONFIGURAÇÃO =========
+    const WFS_BASE_URL =
+      "https://wms2.campinas.sp.gov.br/cgi-bin/mapserv/?map=/srv/www/sistemas-seplan/wms2.campinas.sp.gov.br/html/map_files/wfs_seclimas.map";
+
+    // Dica: altere o centro/zoom inicial conforme desejar (Campinas aproximado)
+    const INITIAL_VIEW = { lat: -22.905, lng: -47.060, zoom: 12 };
+
+    // ========= MAPA E BASEMAPS =========
+    const map = L.map("map", {
+      center: [INITIAL_VIEW.lat, INITIAL_VIEW.lng],
+      zoom: INITIAL_VIEW.zoom
+    });
+
+    const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> colaboradores'
+    }).addTo(map);
+
+    // Satélite (alternativa legal sem chave): Esri World Imagery
+    const esriImagery = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      {
+        attribution:
+          "Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+      }
+    );
+
+    // OPCIONAL – Google Satélite via GoogleMutant (requer API key + scripts acima)
+    // const googleSat = L.gridLayer.googleMutant({
+    //   type: "satellite" // hybrid, roadmap, terrain também existem
+    // });
+
+    const baseMaps = {
+      "OpenStreetMap": osm,
+      "Satélite (Esri World Imagery)": esriImagery,
+      // "Satélite (Google)*": googleSat // *requer chave API e plugin habilitados
+    };
+
+    // ========= CONTROLE DE CAMADAS =========
+    // Criaremos LayerGroups vazios por camada do WFS, populados on-demand
+    const overlays = {};               // título -> LayerGroup
+    const wfsMetaByTitle = {};         // título -> { name, title }
+    const layerStateByTitle = {};      // título -> { loaded: bool, layer: L.GeoJSON|L.LayerGroup }
+
+    const layersControl = L.control.layers(baseMaps, overlays, {
+      collapsed: false
+    }).addTo(map);
+
+    L.control.scale({ metric: true, imperial: false }).addTo(map);
+
+    // ========= STATUS UI =========
+    const statusEl = document.getElementById("status");
+    function setStatus(html, cls = "ok") {
+      statusEl.innerHTML = html;
+      statusEl.className = `status ${cls}`;
+    }
+
+    // ========= HELPERS =========
+    function urlWithParams(base, params) {
+      // Garante preservação do parâmetro 'map' já existente e acrescenta os demais
+      const u = new URL(base);
+      Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, v));
+      return u.toString();
+    }
+
+    async function fetchXml(url) {
+      const res = await fetch(url, { mode: "cors" });
+      if (!res.ok) throw new Error(`Falha ao buscar XML: ${res.status} ${res.statusText}`);
+      const text = await res.text();
+      return new window.DOMParser().parseFromString(text, "application/xml");
+    }
+
+    async function fetchJson(url) {
+      const res = await fetch(url, { mode: "cors" });
+      if (!res.ok) throw new Error(`Falha ao buscar JSON: ${res.status} ${res.statusText}`);
+      return await res.json();
+    }
+
+    function parseCapabilities(xmlDoc) {
+      // Suporta WFS 1.x e 2.0 – procura FeatureTypeList/FeatureType
+      const fts = Array.from(xmlDoc.getElementsByTagName("FeatureType"));
+      return fts.map(ft => {
+        const nameEl = ft.getElementsByTagName("Name")[0];
+        const titleEl = ft.getElementsByTagName("Title")[0];
+        const name = nameEl ? nameEl.textContent.trim() : null;
+        const title = (titleEl ? titleEl.textContent.trim() : name) || name;
+        return { name, title };
+      }).filter(x => x.name);
+    }
+
+    async function getFeatureAsGeoJSON(typeName) {
+      // Tenta WFS 2.0.0 (typeNames, count) e faz fallback para 1.1.0 (typeName, maxFeatures)
+      // Saída sempre em GeoJSON (application/json), srsName WGS84 (Leaflet aceita Lat/Lng)
+      const p20 = {
+        service: "WFS",
+        request: "GetFeature",
+        version: "2.0.0",
+        typeNames: typeName,
+        srsName: "EPSG:4326",
+        outputFormat: "application/json"
+        // Opcional: count: 5000
+      };
+      const url20 = urlWithParams(WFS_BASE_URL, p20);
+      try {
+        return await fetchJson(url20);
+      } catch (e) {
+        console.warn("Falha WFS 2.0.0, tentando 1.1.0…", e);
+        const p11 = {
+          service: "WFS",
+          request: "GetFeature",
+          version: "1.1.0",
+          typeName: typeName,
+          srsName: "EPSG:4326",
+          outputFormat: "application/json"
+          // Opcional: maxFeatures: 5000
+        };
+        const url11 = urlWithParams(WFS_BASE_URL, p11);
+        return await fetchJson(url11);
+      }
+    }
+
+    function defaultStyle(feature) {
+      // Estilo simples: linhas/áreas azuis, pontos vermelhos
+      const geomType = feature.geometry ? feature.geometry.type : "";
+      if (geomType.includes("Point")) {
+        return { color: "#b30000", weight: 2, fillColor: "#ff5252", fillOpacity: 0.7, radius: 5 };
+      } else {
+        return { color: "#1976d2", weight: 2, fillOpacity: 0.1 };
+      }
+    }
+
+    function pointToLayer(feature, latlng) {
+      const s = defaultStyle(feature);
+      return L.circleMarker(latlng, s);
+    }
+
+    function onEachFeature(feature, layer) {
+      // Popup automático com todos os atributos
+      if (feature && feature.properties) {
+        const rows = Object.entries(feature.properties)
+          .map(([k, v]) => `<tr><th style="text-align:left;padding-right:8px;">${k}</th><td>${v}</td></tr>`)
+          .join("");
+        layer.bindPopup(`<table>${rows}</table>`);
+      }
+    }
+
+    async function loadWfsLayer(title) {
+      const meta = wfsMetaByTitle[title];
+      if (!meta) return;
+
+      setStatus(`Carregando camada: <b>${title}</b>…`);
+      try {
+        const data = await getFeatureAsGeoJSON(meta.name);
+        // Cria o GeoJSON layer
+        const gj = L.geoJSON(data, {
+          style: defaultStyle,
+          pointToLayer,
+          onEachFeature
+        });
+        // Guarda e adiciona ao LayerGroup cadastrado no controle
+        const group = overlays[title];
+        group.clearLayers();
+        group.addLayer(gj);
+
+        // Ajusta a visão na primeira carga (se tiver geometria)
+        try {
+          const b = gj.getBounds();
+          if (b && b.isValid()) map.fitBounds(b.pad(0.08));
+        } catch (_) {}
+
+        layerStateByTitle[title] = { loaded: true, layer: gj };
+        setStatus(`Camada “${title}” carregada.`, "ok");
+      } catch (e) {
+        console.error(e);
+        setStatus(`Erro ao carregar a camada “${title}”. Veja o console.`, "err");
+      }
+    }
+
+    // Eventos para carregar/limpar sob demanda
+    map.on("overlayadd", (ev) => {
+      // ev.name só está disponível no Layers Control "padrão" a partir de Leaflet 1.9 (com patch),
+      // então derivamos pelo LayerGroup referenciado.
+      const title = Object.keys(overlays).find(t => overlays[t] === ev.layer);
+      if (!title) return;
+
+      const st = layerStateByTitle[title] || { loaded: false };
+      if (!st.loaded) {
+        loadWfsLayer(title);
+      } else {
+        setStatus(`Camada “${title}” habilitada.`, "ok");
+      }
+    });
+
+    map.on("overlayremove", (ev) => {
+      const title = Object.keys(overlays).find(t => overlays[t] === ev.layer);
+      if (!title) return;
+      setStatus(`Camada “${title}” desabilitada.`, "ok");
+    });
+
+    // ========= CARREGAR GETCAPABILITIES E MONTAR CHECKBOXES =========
+    (async function init() {
+      try {
+        const capsUrl = urlWithParams(WFS_BASE_URL, {
+          service: "WFS",
+          request: "GetCapabilities"
+        });
+        const xml = await fetchXml(capsUrl);
+        const layers = parseCapabilities(xml);
+
+        if (!layers.length) {
+          setStatus("Nenhuma camada WFS encontrada no GetCapabilities.", "err");
+          return;
+        }
+
+        // Cria um LayerGroup vazio por camada e registra no controle
+        layers.forEach(({ name, title }) => {
+          const group = L.layerGroup();      // vazio, carregaremos on-demand
+          overlays[title] = group;
+          wfsMetaByTitle[title] = { name, title };
+          layerStateByTitle[title] = { loaded: false, layer: null };
+          layersControl.addOverlay(group, title);
+        });
+
+        setStatus(`WFS ok. ${layers.length} camada(s) disponíveis. Marque no painel para carregar.`);
+      } catch (e) {
+        console.error(e);
+        setStatus(
+          "Falha ao ler o GetCapabilities do WFS. Verifique se o serviço está acessível via CORS.",
+          "err"
+        );
+      }
+    })();
+  </script>
+</body>
+</html>
