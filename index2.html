@@ -6,7 +6,6 @@
   <title>Leaflet + WFS (GeoJSON)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
 
-  <!-- Leaflet CSS/JS via CDN (CORRETO: com tags <link> e <script>) -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -28,7 +27,6 @@
   <div id="map"></div>
 
   <script>
-  // Aguarda o Leaflet carregar (por causa do 'defer' acima)
   window.addEventListener('DOMContentLoaded', () => {
     const map = L.map('map').setView([-22.905, -47.060], 12);
 
@@ -36,7 +34,7 @@
       attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    // 🔁 WFS (WFS 2.0.0 -> GeoJSON)
+    // CORRIGIDO: SEM &amp;
     const wfsUrl =
       "https://wms2-desenv.campinas.sp.gov.br/cgi-bin/mapserv" +
       "?map=/srv/www/sistemas-seplan/wms2.campinas.sp.gov.br/html/map_files/wfs_seclimas_geojson.map" +
@@ -60,14 +58,15 @@
           onEachFeature: (feature, layer) => {
             if (feature && feature.properties) {
               const rows = Object.entries(feature.properties)
-                .map(([k, v]) => `<tr><th style="text-align:left;padding-right:8px">${k}</th><td>${v}</td></tr>`)
+                .map(([k, v]) =>
+                  `<tr><th style="text-align:left;padding-right:8px">${k}</th><td>${v}</td></tr>`
+                )
                 .join('');
               layer.bindPopup(`<table>${rows}</table>`);
             }
           }
         }).addTo(map);
 
-        // centraliza nos dados (se houver)
         try {
           const b = layer.getBounds();
           if (b.isValid()) map.fitBounds(b.pad(0.08));
@@ -75,7 +74,7 @@
       })
       .catch(err => {
         console.error("Falha ao carregar GeoJSON do WFS:", err);
-        alert("Erro ao carregar o WFS (ver console). Se o site estiver em outro domínio, pode ser CORS.");
+        alert("Erro ao carregar o WFS (ver console). Pode ser CORS.");
       });
   });
   </script>
