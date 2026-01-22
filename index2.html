@@ -3,80 +3,25 @@
 <html lang="pt-br">
 <head>
   <meta charset="utf-8"/>
-  <title>Leaflet + WFS (GeoJSON)</title>
+  <title>Teste Leaflet</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha512-p6EO6nR8Cz8v7Pt3jZ7Cw1eQ2h6Xkz6o3c3BD6xw9pF2Hr6K2gZb9C9x5GadD7Xv7tQOa2TQ3b1pAHkCk8ZfPw=="
-    crossorigin=""
-  />
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=="
-    crossorigin=""
-    defer
-  ></script>
-
-  <style>
-    html, body, #map { height: 100%; margin: 0; }
-  </style>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+  <style>html,body,#map{height:100%;margin:0}</style>
 </head>
 <body>
-  <div id="map"></div>
-
-  <script>
-  window.addEventListener('DOMContentLoaded', () => {
-    const map = L.map('map').setView([-22.905, -47.060], 12);
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap'
-    }).addTo(map);
-
-    // CORRIGIDO: SEM &amp;
-    const wfsUrl =
-      "https://wms2-desenv.campinas.sp.gov.br/cgi-bin/mapserv" +
-      "?map=/srv/www/sistemas-seplan/wms2.campinas.sp.gov.br/html/map_files/wfs_seclimas_geojson.map" +
-      "&SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&typeNames=ms:nascentes" +
-      "&outputFormat=application/json&srsName=EPSG:4326";
-
-    fetch(wfsUrl)
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then(geojson => {
-        const layer = L.geoJSON(geojson, {
-          pointToLayer: (feature, latlng) =>
-            L.circleMarker(latlng, {
-              radius: 5,
-              color: '#b30000',
-              fillColor: '#ff5252',
-              fillOpacity: 0.7
-            }),
-          onEachFeature: (feature, layer) => {
-            if (feature && feature.properties) {
-              const rows = Object.entries(feature.properties)
-                .map(([k, v]) =>
-                  `<tr><th style="text-align:left;padding-right:8px">${k}</th><td>${v}</td></tr>`
-                )
-                .join('');
-              layer.bindPopup(`<table>${rows}</table>`);
-            }
-          }
-        }).addTo(map);
-
-        try {
-          const b = layer.getBounds();
-          if (b.isValid()) map.fitBounds(b.pad(0.08));
-        } catch (e) {}
-      })
-      .catch(err => {
-        console.error("Falha ao carregar GeoJSON do WFS:", err);
-        alert("Erro ao carregar o WFS (ver console). Pode ser CORS.");
-      });
-  });
-  </script>
+<div id="map"></div>
+<script>
+window.addEventListener('DOMContentLoaded', () => {
+  if (!window.L) {
+    document.body.innerHTML = '<pre>Leaflet não carregou. Verifique a rede/CDN.</pre>';
+    return;
+  }
+  const map = L.map('map').setView([-22.905, -47.060], 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap'
+  }).addTo(map);
+});
+</script>
 </body>
 </html>
