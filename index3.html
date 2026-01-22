@@ -1,0 +1,91 @@
+
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8"/>
+  <title>Leaflet + WFS (GeoJSON)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    .banner{position:absolute;z-index:1000;top:10px;left:10px;background:#fff;padding:8px 12px;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.15);font:13px/1.2 Segoe UI, Arial}
+    .err{color:#b00020}
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<div id="msg" class="banner">Inicializando…</div>
+
+<script>
+window.addEventListener('DOMContentLoaded', async () => {
+  const msg = document.getElementById('msg');
+  function info(t, isErr=false){ msg.className = 'banner'+(isErr?' err':''); msg.textContent = t; }
+
+  if (!window.L) { info('Leaflet não carregou. Verifique a rede/CDN.', true); return; }
+
+  const map = L.map('map').setView([-22.905, -47.060], 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap' }).addTo(map);
+
+  // ⚠️ ATENÇÃO: use '&' (E comercial) — NUNCA '&amp;' aqui.
+  const wfsUrl =
+    "https://wms2-desenv.campinas.sp.gov.br/cgi-bin/mapserv" +
+    "?map=/srv/www/sistemas-seplan/wms2.campinas.sp.gov.br/html/map_files/wfs_seclimas_geojson.map" +
+    "&SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&typeNames=ms:nascentes" +
+    "&outputFormat=application/json&srsName=EPSG:4326";
+
+  info('Baixando GeoJSON do WFS…');
+  try {
+    const r = await fetch(wfsUrl, { mode: 'cors' }); // se o servidor não tiver CORS e estiver em outro domínio, dará erro aqui
+    if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+
+    // Tente detectar se o servidor devolveu XML por engano (ex.: outputFormat ignorado)
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      // ainda pode ser JSON sem header; vamos conferir o texto
+      const text = await r.text();
+      try {
+        const json = JSON.parse(text);
+        renderGeoJSON(json);
+      } catch(parseErr) {
+        console.error('Resposta não-JSON. Conteúdo recebido:', text.slice(0,500));
+        throw new Error('O WFS não retornou JSON (talvez outputFormat não aceito).');
+      }
+    } else {
+      const geojson = await r.json();
+      renderGeoJSON(geojson);
+    }
+  } catch (e) {
+    console.error('Falha ao carregar GeoJSON do WFS:', e);
+    const sameOrigin = location.hostname.endsWith('wms2-desenv.campinas.sp.gov.br');
+    info(
+      (e.message || e.toString()) + 
+      (!sameOrigin ? ' — Provável CORS: habilite Access-Control-Allow-Origin no Apache do WFS.' : ''),
+      true
+    );
+  }
+
+  function renderGeoJSON(geojson){
+    const layer = L.geoJSON(geojson, {
+      pointToLayer: (_, latlng) => L.circleMarker(latlng, {
+        radius: 5, color:'#b30000', fillColor:'#ff5252', fillOpacity: .7
+      }),
+      onEachFeature: (f, lyr) => {
+        if (f && f.properties) {
+          const rows = Object.entries(f.properties)
+            .map(([k,v]) => `<tr><th style="text-align:left;padding-right:8px">${k}</th><td>${v}</td></tr>`)
+            .join('');
+          lyr.bindPopup(`<table>${rows}</table>`);
+        }
+      }
+    }).addTo(map);
+    try {
+      const b = layer.getBounds();
+      if (b && b.isValid()) map.fitBounds(b.pad(.08));
+    } catch(_) {}
+    info('OK: GeoJSON carregado.');
+  }
+});
+</script>
+</body>
+</html>
