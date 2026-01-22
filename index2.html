@@ -5,52 +5,79 @@
   <meta charset="utf-8"/>
   <title>Leaflet + WFS (GeoJSON)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  https://unpkg.com/leaflet@1.9.4/dist/leaflet.css
-  https://unpkg.com/leaflet@1.9.4/dist/leaflet.js</script>
-  <style>html,body,#map{height:100%;margin:0}</style>
+
+  <!-- Leaflet CSS/JS via CDN (CORRETO: com tags <link> e <script>) -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha512-p6EO6nR8Cz8v7Pt3jZ7Cw1eQ2h6Xkz6o3c3BD6xw9pF2Hr6K2gZb9C9x5GadD7Xv7tQOa2TQ3b1pAHkCk8ZfPw=="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=="
+    crossorigin=""
+    defer
+  ></script>
+
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+  </style>
 </head>
 <body>
-<div id="map"></div>
-<script>
-const map = L.map('map').setView([-22.905, -47.060], 12);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '© OpenStreetMap'
-}).addTo(map);
+  <div id="map"></div>
 
-// URL WFS 2.0.0 -> GeoJSON (ajuste se necessário para 1.1.0)
-const wfsUrl = "https://wms2-desenv.campinas.sp.gov.br/cgi-bin/mapserv" +
-  "?map=/srv/www/sistemas-seplan/wms2.campinas.sp.gov.br/html/map_files/wfs_seclimas_geojson.map" +
-  "&SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&typeNames=ms:nascentes" +
-  "&outputFormat=application/json&srsName=EPSG:4326";
+  <script>
+  // Aguarda o Leaflet carregar (por causa do 'defer' acima)
+  window.addEventListener('DOMContentLoaded', () => {
+    const map = L.map('map').setView([-22.905, -47.060], 12);
 
-fetch(wfsUrl)
-  .then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  })
-  .then(geojson => {
-    const layer = L.geoJSON(geojson, {
-      pointToLayer: (f, latlng) =>
-        L.circleMarker(latlng, {radius: 5, color: '#b30000', fillColor:'#ff5252', fillOpacity:0.7}),
-      onEachFeature: (f, layer) => {
-        if (f.properties) {
-          const rows = Object.entries(f.properties)
-            .map(([k,v])=>`<tr><th style="text-align:left;padding-right:8px">${k}</th><td>${v}</td></tr>`).join('');
-          layer.bindPopup(`<table>${rows}</table>`);
-        }
-      }
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    // centraliza nos dados (se houver)
-    try {
-      const b = layer.getBounds();
-      if (b.isValid()) map.fitBounds(b.pad(0.08));
-    } catch(e) {}
-  })
-  .catch(err => {
-    console.error("Falha ao carregar GeoJSON do WFS:", err);
-    alert("Erro ao carregar o WFS (ver console). Pode ser CORS.");
+    // 🔁 WFS (WFS 2.0.0 -> GeoJSON)
+    const wfsUrl =
+      "https://wms2-desenv.campinas.sp.gov.br/cgi-bin/mapserv" +
+      "?map=/srv/www/sistemas-seplan/wms2.campinas.sp.gov.br/html/map_files/wfs_seclimas_geojson.map" +
+      "&SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&typeNames=ms:nascentes" +
+      "&outputFormat=application/json&srsName=EPSG:4326";
+
+    fetch(wfsUrl)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(geojson => {
+        const layer = L.geoJSON(geojson, {
+          pointToLayer: (feature, latlng) =>
+            L.circleMarker(latlng, {
+              radius: 5,
+              color: '#b30000',
+              fillColor: '#ff5252',
+              fillOpacity: 0.7
+            }),
+          onEachFeature: (feature, layer) => {
+            if (feature && feature.properties) {
+              const rows = Object.entries(feature.properties)
+                .map(([k, v]) => `<tr><th style="text-align:left;padding-right:8px">${k}</th><td>${v}</td></tr>`)
+                .join('');
+              layer.bindPopup(`<table>${rows}</table>`);
+            }
+          }
+        }).addTo(map);
+
+        // centraliza nos dados (se houver)
+        try {
+          const b = layer.getBounds();
+          if (b.isValid()) map.fitBounds(b.pad(0.08));
+        } catch (e) {}
+      })
+      .catch(err => {
+        console.error("Falha ao carregar GeoJSON do WFS:", err);
+        alert("Erro ao carregar o WFS (ver console). Se o site estiver em outro domínio, pode ser CORS.");
+      });
   });
-</script>
+  </script>
 </body>
 </html>
